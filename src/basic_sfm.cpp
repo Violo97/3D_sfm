@@ -505,7 +505,43 @@ void BasicSfM::solve()
     // should be replaced with the criteria described above
     /////////////////////////////////////////////////////////////////////////////////////////
 
+    cv::Mat E = cv::findEssentialMat(points0, points1, intrinsics_matrix, cv::RANSAC, 0.999, 0.001, inlier_mask_E); // estimate Essential matrix
+    //cv::Mat R , t;
+    //cv::recoverPose(E, points_i, points_j, new_intrinsics_matrix_, R , t , inlier_mask_E); // recover relative pose from Essential matrix
+      //cv::Mat R = pose_.rowRange(0,3).colRange(0,3); // extract rotation matrix
+      //cv::Mat t = pose_.rowRange(0,3).col(3); // extract translation vector
 
+    // Perform geometric validation using Homography matrix
+    cv::Mat H = cv::findHomography(points0, points1, cv::RANSAC, 0.001, inlier_mask_H); // estimate Homography matrix
+
+    //control the number of inliers of both model
+    int n_inlE = 0 , n_inlH = 0;
+    for (int i = 0 ; i < points0.size() ; i++){
+
+      if(inlier_mask_E.at<uchar>(i)) n_inlE++;
+      if(inlier_mask_H.at<uchar>(i)) n_inlH++;
+
+    }
+
+    //recover the pose 
+    if( n_inlE > n_inlH){
+      cv::Mat R , t;
+      cv::recoverPose(E, points0, points1, intrinsics_matrix, R , t , inlier_mask_E); // recover relative pose from Essential matrix
+
+      // Analyze the rotation matrix
+      double angle_x = atan2(R.at<double>(2, 1), R.at<double>(2, 2));
+      double angle_y = atan2(-R.at<double>(2, 0), sqrt(pow(R.at<double>(2, 1), 2) + pow(R.at<double>(2, 2), 2)));
+      double angle_z = atan2(R.at<double>(1, 0), R.at<double>(0, 0));
+
+      // Check if camera motion is mainly sideward
+      bool is_sideward_motion = false;
+      if (std::abs(angle_y) > 0.5 && std::abs(angle_x) < 0.1 && std::abs(angle_z) < 0.1) {
+        //sideway motion
+        init_r_mat = R;
+        init_t_vec = t;
+      }
+
+    }
 
 
 

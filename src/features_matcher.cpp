@@ -91,7 +91,6 @@ void FeatureMatcher::extractFeatures()
     //drawKeypoints(cv::imread(images_names_[i]), features_[i], output);
     //imshow("Keypoints", output);
     //cv::waitKey(0);
-    std::cout<<"after creation of array\n";
     /////////////////////////////////////////////////////////////////////////////////////////
   }
 }
@@ -154,13 +153,26 @@ void FeatureMatcher::exhaustiveMatching()
       cv::Mat H, mask_H; // initialize Homography matrix and mask
       H = cv::findHomography(points_i, points_j, cv::RANSAC, 1.0, mask_H); // estimate Homography matrix
 
+      int count_inE = 0 , count_inH = 0;
       //cv::perspectiveTransform(points_i, point_j, H);
+      for (int k = 0; k < matches.size(); k++) {
+        if(mask_E.at<uchar>(k)){
+          count_inE++;
+        }
+        if(mask_H.at<uchar>(k)){
+          count_inH++;
+        }
+      }  
 
       // Select inliers from matches using both geometric models
       for (int k = 0; k < matches.size(); k++) {
-        if (mask_E.at<uchar>(k) && mask_H.at<uchar>(k)) { // if match is an inlier for both models
+        /*if (mask_E.at<uchar>(k) && mask_H.at<uchar>(k)) { // if match is an inlier for both models
           inlier_matches.push_back(matches[k]); // add match to inlier matches
-        }
+        }*/
+        if(count_inE < count_inH && mask_E.at<uchar>(k)) inlier_matches.push_back(matches[k]);
+        if(count_inH < count_inE && mask_H.at<uchar>(k)) inlier_matches.push_back(matches[k]);
+
+
       }
 
       // Set inlier matches only if number of matches is larger than a threshold
