@@ -473,6 +473,8 @@ void BasicSfM::solve()
       }
     }
 
+    std::cout<<ref_cam_pose_idx<<" "<<new_cam_pose_idx<<"\n";
+
     if( max_corr < 0 )
     {
       std::cout<<"No seed pair found, exiting"<<std::endl;
@@ -501,7 +503,7 @@ void BasicSfM::solve()
     // Store the transformation into init_r_mat and  init_t_vec; defined above and set the seed_found flag to true
     // Otherwise, test a different [ref_cam_pose_idx, new_cam_pose_idx] pair (while( !seed_found ) loop)
     // The dummy condition here:
-    if( true ) seed_found = true;
+    //if( true ) seed_found = true;
     // should be replaced with the criteria described above
     /////////////////////////////////////////////////////////////////////////////////////////
 
@@ -523,24 +525,17 @@ void BasicSfM::solve()
 
     }
 
+    seed_found = false;
+
+
     //recover the pose 
-    if( n_inlE > n_inlH){
-      cv::Mat R , t;
-      cv::recoverPose(E, points0, points1, intrinsics_matrix, R , t , inlier_mask_E); // recover relative pose from Essential matrix
+    if( n_inlE > n_inlH ){
+      cv::recoverPose(E, points0, points1, intrinsics_matrix, init_r_mat , init_t_vec , inlier_mask_E); // recover relative pose from Essential matrix
+      if(std::abs(init_t_vec.at<double>(0)) > std::abs(init_t_vec.at<double>(2))){
 
-      // Analyze the rotation matrix
-      double angle_x = atan2(R.at<double>(2, 1), R.at<double>(2, 2));
-      double angle_y = atan2(-R.at<double>(2, 0), sqrt(pow(R.at<double>(2, 1), 2) + pow(R.at<double>(2, 2), 2)));
-      double angle_z = atan2(R.at<double>(1, 0), R.at<double>(0, 0));
+        seed_found = true;
 
-      // Check if camera motion is mainly sideward
-      bool is_sideward_motion = false;
-      if (std::abs(angle_y) > 0.5 && std::abs(angle_x) < 0.1 && std::abs(angle_z) < 0.1) {
-        //sideway motion
-        init_r_mat = R;
-        init_t_vec = t;
       }
-
     }
 
 
@@ -580,7 +575,7 @@ void BasicSfM::solve()
   init_r_mat.copyTo(proj_mat1(cv::Rect(0, 0, 3, 3)));
   init_t_vec.copyTo(proj_mat1(cv::Rect(3, 0, 1, 3)));
 
-  cv::triangulatePoints(	proj_mat0, proj_mat1, points0, points1, hpoints4D );
+  cv::triangulatePoints(proj_mat0, proj_mat1, points0, points1, hpoints4D );
 
   int r = 0;
   // Initialize the first optimized points
@@ -722,8 +717,44 @@ void BasicSfM::solve()
             // pt[2] = /*X coordinate of the estimated point */;
             /////////////////////////////////////////////////////////////////////////////////////////
 
+            //recover the axis-angle rotation from init_r_mat between new_camera_pose_idx and cam_idx
+            //cv::Rodriges(init_r_vec)
+            cv::Mat cam_r_mat , cam1_r_mat;
+            //generate the vector 3X1 with the rotation coordinates 
+            cv::Mat_<double> cam0_r_vec = (cv::Mat_<double>(3,1) << cam0_data[0],cam0_data[1],cam0_data[2]);
+            cv::Mat_<double> cam0_t_vec = (cv::Mat_<double>(3,1) << cam0_data[3],cam0_data[4],cam0_data[5]);
 
+            cv::Rodrigues(cam0_r_vec , cam_r_mat);
 
+            cam_r_mat.copyTo(proj_mat0(cv::Rect(0, 0, 3, 3)));
+            cam0_t_vec.copyTo(proj_mat0(cv::Rect(3, 0, 1, 3)));
+
+            //generate the vector 3X1 with the rotation coordinates 
+            cv::Mat_<double> cam1_r_vec = (cv::Mat_<double>(3,1) << cam1_data[0],cam1_data[1],cam1_data[2]);
+            cv::Mat_<double> cam1_t_vec = (cv::Mat_<double>(3,1) << cam1_data[3],cam1_data[4],cam1_data[5]);
+
+            cv::Rodrigues(cam1_r_vec , cam1_r_mat);
+
+            cam1_r_mat.copyTo(proj_mat1(cv::Rect(0, 0, 3, 3)));
+            cam1_t_vec.copyTo(proj_mat1(cv::Rect(3, 0, 1, 3)));
+
+            //define the two points into the two images 
+            points0[0] = cv::Point2d(observations_[cam_observation[new_cam_pose_idx][pt_idx] * 2],
+                             observations_[cam_observation[new_cam_pose_idx][pt_idx] * 2 + 1]);
+            points1[0] = cv::Point2d(observations_[cam_observation[cam_idx][pt_idx] * 2],
+                             observations_[cam_observation[cam_idx][pt_idx] * 2 + 1]);
+
+            cv::triangulatePoints(proj_mat0, proj_mat1, points0, points1, hpoints4D );
+            
+            if(checkCheiralityConstraint(new_cam_pose_idx, pt_idx ) && checkCheiralityConstraint (cam_idx, pt_idx )){
+              n_new_pts++;
+              pts_optim_iter_[pt_idx] = 1;
+              double *pt = pointBlockPtr(pt_idx);
+              pt[0] = hpoints4D.at<double>(0,r)/hpoints4D.at<double>(3,r);
+              pt[1] = hpoints4D.at<double>(1,r)/hpoints4D.at<double>(3,r);
+              pt[2] = hpoints4D.at<double>(2,r)/hpoints4D.at<double>(3,r);
+
+            }
 
 
             /////////////////////////////////////////////////////////////////////////////////////////
