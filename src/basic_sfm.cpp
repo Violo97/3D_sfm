@@ -42,8 +42,8 @@ struct ReprojectionError
     // the camera model that Noah Snavely's Bundler assumes, whereby
     // the camera coordinate system has a negative z axis.
     //TODO: Check if this part is suitable for the project
-    T xp = - p[0] / p[2];
-    T yp = - p[1] / p[2];
+    T xp = + p[0] / p[2];
+    T yp = + p[1] / p[2];
 
     // Apply second and fourth order radial distortion.
     /*const T& l1 = camera_params[1];
@@ -573,7 +573,7 @@ void BasicSfM::solve()
     //recover the pose 
     if( n_inlE > n_inlH ){
       cv::recoverPose(E, points0, points1, intrinsics_matrix, init_r_mat , init_t_vec , inlier_mask_E); // recover relative pose from Essential matrix
-      if(std::abs(init_t_vec.at<double>(0)) > std::abs(init_t_vec.at<double>(2))){
+      if((std::abs(init_t_vec.at<double>(1)/norm(init_t_vec)) > std::abs(init_t_vec.at<double>(2)/norm(init_t_vec))) && (std::abs(init_t_vec.at<double>(0)/norm(init_t_vec)) > std::abs(init_t_vec.at<double>(2)/norm(init_t_vec)))){
 
         seed_found = true;
 
@@ -727,6 +727,7 @@ void BasicSfM::solve()
     int n_new_pts = 0;
     std::vector<cv::Point2d> points0(1), points1(1);
     cv::Mat_<double> proj_mat0(3, 4), proj_mat1(3, 4), hpoints4D;
+    std::cout<<"camera : "<<new_cam_pose_idx<<"\n";
     for(int cam_idx = 0; cam_idx < num_cam_poses_; cam_idx++ )
     {
       if( cam_pose_optim_iter_[cam_idx] > 0 )
@@ -739,6 +740,8 @@ void BasicSfM::solve()
           {
             double *cam0_data = cameraBlockPtr(new_cam_pose_idx),
                    *cam1_data = cameraBlockPtr(cam_idx);
+
+            if(!inlier_mask_E.at<uchar>(pt_idx)) continue;       
 
             //////////////////////////// Code to be completed (4/6) /////////////////////////////////
             // Triangulate the 3D point with index pt_idx by using the observation of this point in the
@@ -785,6 +788,8 @@ void BasicSfM::solve()
                              observations_[cam_observation[new_cam_pose_idx][pt_idx] * 2 + 1]);
             points1[0] = cv::Point2d(observations_[cam_observation[cam_idx][pt_idx] * 2],
                              observations_[cam_observation[cam_idx][pt_idx] * 2 + 1]);
+
+            std::cout<<points0[0]<<" "<<points1[0]<<"\n";                 
 
             cv::triangulatePoints(proj_mat0, proj_mat1, points0, points1, hpoints4D );
             
@@ -897,17 +902,21 @@ void BasicSfM::bundleAdjustmentIter( int new_cam_idx )
         //////////////////////////////////////////////////////////////////////////////////
         //Check if it's the right variable to get to camera pose
         //cam_pose_index_[i_obs]
+        //const cv::Mat K = cv::Mat::eye(3,3);
         //bal_problem variables must be replaced with x and y of the observation
         double z_coord = bck_parameters[6*cam_pose_index_[i_obs] + 3*i_obs + 2];
         //std::cout<<"x : "<<z_coord<<" y : "<<parameters_[cameraBlockPtr(i_obs)[1]]/z_coord<<"\n";
         ceres::CostFunction* cost_function =ReprojectionError::Create(
-          bck_parameters[6*cam_pose_index_[i_obs] + 3*i_obs]/z_coord,
-          bck_parameters[6*cam_pose_index_[i_obs] + 3*i_obs + 1]/z_coord);
+            observations_.at(i_obs*2),
+            observations_.at(i_obs*2 + 1)
+        );
+          //bck_parameters[6*cam_pose_index_[i_obs] + 3*i_obs]/z_coord,
+          //bck_parameters[6*cam_pose_index_[i_obs] + 3*i_obs + 1]/z_coord);
         //mutable variables must be replaced with the camera pointer and the pointer to the observation point   
         problem.AddResidualBlock(cost_function,
-                           nullptr, /*Cauchy loss */
-                           cameraBlockPtr(cam_pose_index_[i_obs]),
-                           pointBlockPtr ( i_obs ));
+                           new ceres::CauchyLoss(2.0*max_reproj_err_), /*Cauchy loss */
+                           cameraBlockPtr(cam_pose_index_.at(i_obs)),
+                           pointBlockPtr ( point_index_.at(i_obs) ));
 
 
 

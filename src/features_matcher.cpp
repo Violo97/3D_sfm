@@ -28,12 +28,19 @@ void FeatureMatcher::extractFeatures()
 
   auto orb_detector = cv::ORB::create(10000, 1.2, 8);
   // Initialize SIFT detector
-  auto sift_detector = cv::SIFT::create();
+  auto sift_detector = cv::SIFT::create(
+    10000,
+		3,
+		0.04,
+		6,
+		0.5);
 
   for( int i = 0; i < images_names_.size(); i++  )
   {
     std::cout<<"Computing descriptors for image "<<i<<std::endl;
     cv::Mat img = readUndistortedImage(images_names_[i]);
+    cv::Mat gray_img; 
+    cv::cvtColor(img, gray_img, cv::COLOR_BGR2GRAY);
 
     //////////////////////////// Code to be completed (1/6) /////////////////////////////////
     // Extract salient points + descriptors from i-th image, and store them into
@@ -43,7 +50,8 @@ void FeatureMatcher::extractFeatures()
     /////////////////////////////////////////////////////////////////////////////////////////
     std::cout<<"before creation array"<<"\n";
     // Detect keypoints and compute descriptors for image i
-    orb_detector->detectAndCompute(cv::imread(images_names_[i]), cv::Mat(), features_[i], descriptors_[i]);
+    orb_detector->detectAndCompute(img, cv::Mat(), features_[i], descriptors_[i]);
+    //sift_detector->detectAndCompute(gray_img, cv::Mat(), features_[i], descriptors_[i]);
 
     std::cout << "value of features "<<features_.size()<<"\n";
     // Extract the color of each feature
@@ -56,10 +64,10 @@ void FeatureMatcher::extractFeatures()
     // Loop over all image
     for (int j = 0; j < features_.size(); j++) {
       // Load image
-      cv::Mat image = cv::imread(images_names_[j]);
+      //cv::Mat image = cv::imread(images_names_[j]);
 
       // Check if image is loaded properly
-      if (image.empty()) {
+      if (img.empty()) {
           std::cerr << "Error: could not load image " << images_names_[j] << std::endl;
           continue;
       }
@@ -72,13 +80,14 @@ void FeatureMatcher::extractFeatures()
         cv::Point2f pt = features_[j][k].pt;
 
         // Check if point is within image dimensions
-        if (pt.x < 0 || pt.x >= image.cols || pt.y < 0 || pt.y >= image.rows) {
+        if (pt.x < 0 || pt.x >= img.cols || pt.y < 0 || pt.y >= img.rows) {
             std::cerr << "Error: feature point " << pt << " is out of bounds for image " << images_names_[j] << std::endl;
             continue;
         }
 
         // Access pixel value at the feature point
-        feats_colors_[j][k] = image.at<cv::Vec3b>(pt);
+        feats_colors_[j][k] = img.at<cv::Vec3b>(pt);
+        std::cout<<feats_colors_[j][k]<<"\n";
       }
     }
 
@@ -120,7 +129,9 @@ void FeatureMatcher::exhaustiveMatching()
       /////////////////////////////////////////////////////////////////////////////////////////
 
       //match descriptor with the similarity between descriptor 
-      cv::BFMatcher matcher(cv::NORM_L2, true); // initialize brute-force matcher
+      cv::BFMatcher matcher(cv::NORM_HAMMING2 , true); // initialize brute-force matcher
+      //cv::BFMatcher matcher(cv::NORM_L2  , true); // initialize brute-force matcher
+
       matcher.match(descriptors_[i], descriptors_[j], matches); // match descriptors
 
       // Get corresponding feature points
@@ -143,15 +154,15 @@ void FeatureMatcher::exhaustiveMatching()
 
       // Perform geometric validation using Essential matrix
       cv::Mat E, mask_E; // initialize Essential matrix and mask
-      E = cv::findEssentialMat(points_i, points_j, new_intrinsics_matrix_, cv::RANSAC, 0.999, 1.0, mask_E); // estimate Essential matrix
+      E = cv::findEssentialMat(points_i, points_j, new_intrinsics_matrix_, cv::RANSAC,0.999, 3 , mask_E); // estimate Essential matrix
       cv::Mat R , t;
-      cv::recoverPose(E, points_i, points_j, new_intrinsics_matrix_, R , t , mask_E); // recover relative pose from Essential matrix
+      //cv::recoverPose(E, points_i, points_j, new_intrinsics_matrix_, R , t , mask_E); // recover relative pose from Essential matrix
       //cv::Mat R = pose_.rowRange(0,3).colRange(0,3); // extract rotation matrix
       //cv::Mat t = pose_.rowRange(0,3).col(3); // extract translation vector
 
       // Perform geometric validation using Homography matrix
       cv::Mat H, mask_H; // initialize Homography matrix and mask
-      H = cv::findHomography(points_i, points_j, cv::RANSAC, 1.0, mask_H); // estimate Homography matrix
+      H = cv::findHomography(points_i, points_j, cv::RANSAC, 3 , mask_H); // estimate Homography matrix
 
       int count_inE = 0 , count_inH = 0;
       //cv::perspectiveTransform(points_i, point_j, H);
@@ -166,17 +177,18 @@ void FeatureMatcher::exhaustiveMatching()
 
       // Select inliers from matches using both geometric models
       for (int k = 0; k < matches.size(); k++) {
-        /*if (mask_E.at<uchar>(k) && mask_H.at<uchar>(k)) { // if match is an inlier for both models
+        if (mask_E.at<uchar>(k) && mask_H.at<uchar>(k)) { // if match is an inlier for both models
           inlier_matches.push_back(matches[k]); // add match to inlier matches
-        }*/
-        if(count_inE < count_inH && mask_E.at<uchar>(k)) inlier_matches.push_back(matches[k]);
-        if(count_inH < count_inE && mask_H.at<uchar>(k)) inlier_matches.push_back(matches[k]);
+        }
+        //if(count_inE < count_inH && mask_E.at<uchar>(k)) inlier_matches.push_back(matches[k]);
+        //if(count_inH < count_inE && mask_H.at<uchar>(k)) inlier_matches.push_back(matches[k]);
 
 
       }
 
       // Set inlier matches only if number of matches is larger than a threshold
       if (inlier_matches.size() > 5) {
+        std::cout<<inlier_matches.size()<<"\n";
         setMatches(i, j, inlier_matches); // set inlier matches
       }
 
