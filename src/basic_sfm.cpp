@@ -26,51 +26,39 @@ struct ReprojectionError
   ReprojectionError(double observed_x, double observed_y):observed_x(observed_x), observed_y(observed_y) {}
 
   template <typename T>
-  //Calculates the projection of the 3D Point into the 2D image plane using camera calibration parameters
+  //Calculates the projection of the 3D Point into the 2D image plane
   //Calculates the projection error
   bool operator()(const T* const camera_pose,
-                  //const T* const camera_params,
                   const T* const point,
                   T* residuals) const {
-    // camera[0,1,2] are the angle-axis rotation.
+    //camera_pose[0,1,2] are the angle-axis rotation.
     T p[3];
     ceres::AngleAxisRotatePoint(camera_pose, point, p);
-    // camera[3,4,5] are the translation.
+    // camera_pose[3,4,5] are the translation.
     p[0] += camera_pose[3]; p[1] += camera_pose[4]; p[2] += camera_pose[5];
 
-    // Compute the center of distortion. The sign change comes from
-    // the camera model that Noah Snavely's Bundler assumes, whereby
-    // the camera coordinate system has a negative z axis.
-    //TODO: Check if this part is suitable for the project
+    // Compute final projected point position. We don't need other parameters because we are in a canonical camera case and the matrix 
+    //obtained from the other projection parameters is the identity
     T xp = + p[0] / p[2];
     T yp = + p[1] / p[2];
 
-    // Apply second and fourth order radial distortion.
-    /*const T& l1 = camera_params[1];
-    const T& l2 = camera_params[2];
-    T r2 = xp*xp + yp*yp;
-    T distortion = 1.0 + r2  * (l1 + l2  * r2);*/
-
-    // Compute final projected point position.
-    //const T& focal = camera_params[0];
-    T predicted_x = /*focal * distortion */ xp;
-    T predicted_y = /*focal * distortion */ yp;
-
     // The error is the difference between the predicted and observed position.
-    residuals[0] = predicted_x - T(observed_x);
-    residuals[1] = predicted_y - T(observed_y);
+    residuals[0] = xp - T(observed_x);
+    residuals[1] = yp - T(observed_y);
     return true;
     }
 
    // Factory to hide the construction of the CostFunction object from the client code.
    static ceres::CostFunction* Create(const double observed_x,
                                       const double observed_y) {
+     //2 is the output size
+     //6 is the camera parameters number (but also size)
+     //3 is the dimension of the 3D point to be projected
      return (new ceres::AutoDiffCostFunction<ReprojectionError, 2, 6, 3>(new ReprojectionError(observed_x, observed_y)));
    }
 
   double observed_x;
   double observed_y;   
-  
   //////////////////////////////////////////////////////////////////////////////////////////
 };
 
@@ -895,24 +883,19 @@ void BasicSfM::bundleAdjustmentIter( int new_cam_idx )
         // The camera position blocks have size (camera_block_size_) of 6 elements,
         // while the point position blocks have size (point_block_size_) of 3 elements.
         //////////////////////////////////////////////////////////////////////////////////
-        //Check if it's the right variable to get to camera pose
-        
-        //bal_problem variables must be replaced with x and y of the observation
-        double z_coord = bck_parameters[6*cam_pose_index_[i_obs] + 3*i_obs + 2];
+
+        //create the cost function passing the x and y coordinates from observations
         ceres::CostFunction* cost_function =ReprojectionError::Create(
             observations_.at(i_obs*2),
             observations_.at(i_obs*2 + 1)
         );
         
-        //mutable variables must be replaced with the camera pointer and the pointer to the observation point   
+        //Creates residual block passing the previously defined cost function, a loss function, the camera pose and the point coordinates   
         problem.AddResidualBlock(cost_function,
                            new ceres::CauchyLoss(2.0*max_reproj_err_), /*Cauchy loss */
                            //new ceres::HuberLoss(2.0*max_reproj_err_), /*Huber loss */
                            cameraBlockPtr(cam_pose_index_.at(i_obs)),
                            pointBlockPtr ( point_index_.at(i_obs) ));
-
-
-
         /////////////////////////////////////////////////////////////////////////////////////////
       }
     }
