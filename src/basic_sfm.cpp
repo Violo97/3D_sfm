@@ -548,13 +548,9 @@ void BasicSfM::solve()
     //if( true ) seed_found = true;
     // should be replaced with the criteria described above
     /////////////////////////////////////////////////////////////////////////////////////////
-
+    
     cv::Mat E = cv::findEssentialMat(points0, points1, intrinsics_matrix, cv::RANSAC, 0.999, 0.001, inlier_mask_E); // estimate Essential matrix
-    //cv::Mat R , t;
-    //cv::recoverPose(E, points_i, points_j, new_intrinsics_matrix_, R , t , inlier_mask_E); // recover relative pose from Essential matrix
-      //cv::Mat R = pose_.rowRange(0,3).colRange(0,3); // extract rotation matrix
-      //cv::Mat t = pose_.rowRange(0,3).col(3); // extract translation vector
-
+    
     // Perform geometric validation using Homography matrix
     cv::Mat H = cv::findHomography(points0, points1, cv::RANSAC, 0.001, inlier_mask_H); // estimate Homography matrix
 
@@ -567,19 +563,16 @@ void BasicSfM::solve()
 
     }
 
-    seed_found = false;
-
-
     //recover the pose 
     if( n_inlE > n_inlH ){
       cv::recoverPose(E, points0, points1, intrinsics_matrix, init_r_mat , init_t_vec , inlier_mask_E); // recover relative pose from Essential matrix
-      if((std::abs(init_t_vec.at<double>(1)/norm(init_t_vec)) > std::abs(init_t_vec.at<double>(2)/norm(init_t_vec))) && (std::abs(init_t_vec.at<double>(0)/norm(init_t_vec)) > std::abs(init_t_vec.at<double>(2)/norm(init_t_vec)))){
+      //control if there is a sideward motion between the two consider images 
+      if((std::abs(init_t_vec.at<double>(1)) > std::abs(init_t_vec.at<double>(2))) || (std::abs(init_t_vec.at<double>(0)/norm(init_t_vec)) > std::abs(init_t_vec.at<double>(2)/norm(init_t_vec)))){
 
         seed_found = true;
 
       }
     }
-
 
 
     /////////////////////////////////////////////////////////////////////////////////////////
@@ -761,27 +754,29 @@ void BasicSfM::solve()
             // pt[1] = /*X coordinate of the estimated point */;
             // pt[2] = /*X coordinate of the estimated point */;
             /////////////////////////////////////////////////////////////////////////////////////////
-
             //recover the axis-angle rotation from init_r_mat between new_camera_pose_idx and cam_idx
-            //cv::Rodriges(init_r_vec)
-            cv::Mat cam_r_mat , cam1_r_mat;
+            //define rotation matrix in format 3x3 , rotation vector with dim 3x1 and the translation vector
+            cv::Mat cam_r_mat , cam_r_vec , cam_t_vec;
             //generate the vector 3X1 with the rotation coordinates 
-            cv::Mat_<double> cam0_r_vec = (cv::Mat_<double>(3,1) << cam0_data[0],cam0_data[1],cam0_data[2]);
-            cv::Mat_<double> cam0_t_vec = (cv::Mat_<double>(3,1) << cam0_data[3],cam0_data[4],cam0_data[5]);
+            cam_r_vec = (cv::Mat_<double>(3,1) << cam0_data[0],cam0_data[1],cam0_data[2]);
+            cam_t_vec = (cv::Mat_<double>(3,1) << cam0_data[3],cam0_data[4],cam0_data[5]);
 
-            cv::Rodrigues(cam0_r_vec , cam_r_mat);
+            //convert rotation vector into rotation matrix
+            cv::Rodrigues(cam_r_vec , cam_r_mat);
 
+            //generate projection matrix for the first camera
             cam_r_mat.copyTo(proj_mat0(cv::Rect(0, 0, 3, 3)));
-            cam0_t_vec.copyTo(proj_mat0(cv::Rect(3, 0, 1, 3)));
+            cam_t_vec.copyTo(proj_mat0(cv::Rect(3, 0, 1, 3)));
 
             //generate the vector 3X1 with the rotation coordinates 
-            cv::Mat_<double> cam1_r_vec = (cv::Mat_<double>(3,1) << cam1_data[0],cam1_data[1],cam1_data[2]);
-            cv::Mat_<double> cam1_t_vec = (cv::Mat_<double>(3,1) << cam1_data[3],cam1_data[4],cam1_data[5]);
+            cam_r_vec = (cv::Mat_<double>(3,1) << cam1_data[0],cam1_data[1],cam1_data[2]);
+            cam_t_vec = (cv::Mat_<double>(3,1) << cam1_data[3],cam1_data[4],cam1_data[5]);
 
-            cv::Rodrigues(cam1_r_vec , cam1_r_mat);
-
-            cam1_r_mat.copyTo(proj_mat1(cv::Rect(0, 0, 3, 3)));
-            cam1_t_vec.copyTo(proj_mat1(cv::Rect(3, 0, 1, 3)));
+            cv::Rodrigues(cam_r_vec , cam_r_mat);
+            
+            //generate projection matrix for the second camera 
+            cam_r_mat.copyTo(proj_mat1(cv::Rect(0, 0, 3, 3)));
+            cam_t_vec.copyTo(proj_mat1(cv::Rect(3, 0, 1, 3)));
 
             //define the two points into the two images 
             points0[0] = cv::Point2d(observations_[cam_observation[new_cam_pose_idx][pt_idx] * 2],
@@ -789,11 +784,12 @@ void BasicSfM::solve()
             points1[0] = cv::Point2d(observations_[cam_observation[cam_idx][pt_idx] * 2],
                              observations_[cam_observation[cam_idx][pt_idx] * 2 + 1]);
 
-            std::cout<<points0[0]<<" "<<points1[0]<<"\n";                 
+            //std::cout<<points0[0]<<" "<<points1[0]<<"\n";                 
 
             cv::triangulatePoints(proj_mat0, proj_mat1, points0, points1, hpoints4D );
             
-            if(checkCheiralityConstraint(new_cam_pose_idx, pt_idx ) && checkCheiralityConstraint (cam_idx, pt_idx )){
+            //control chierality constraint
+            if(hpoints4D.at<double>(2,r)/hpoints4D.at<double>(3,r) > 0){
               n_new_pts++;
               pts_optim_iter_[pt_idx] = 1;
               double *pt = pointBlockPtr(pt_idx);
@@ -802,7 +798,6 @@ void BasicSfM::solve()
               pt[2] = hpoints4D.at<double>(2,r)/hpoints4D.at<double>(3,r);
 
             }
-
 
             /////////////////////////////////////////////////////////////////////////////////////////
           }
@@ -901,20 +896,18 @@ void BasicSfM::bundleAdjustmentIter( int new_cam_idx )
         // while the point position blocks have size (point_block_size_) of 3 elements.
         //////////////////////////////////////////////////////////////////////////////////
         //Check if it's the right variable to get to camera pose
-        //cam_pose_index_[i_obs]
-        //const cv::Mat K = cv::Mat::eye(3,3);
+        
         //bal_problem variables must be replaced with x and y of the observation
         double z_coord = bck_parameters[6*cam_pose_index_[i_obs] + 3*i_obs + 2];
-        //std::cout<<"x : "<<z_coord<<" y : "<<parameters_[cameraBlockPtr(i_obs)[1]]/z_coord<<"\n";
         ceres::CostFunction* cost_function =ReprojectionError::Create(
             observations_.at(i_obs*2),
             observations_.at(i_obs*2 + 1)
         );
-          //bck_parameters[6*cam_pose_index_[i_obs] + 3*i_obs]/z_coord,
-          //bck_parameters[6*cam_pose_index_[i_obs] + 3*i_obs + 1]/z_coord);
+        
         //mutable variables must be replaced with the camera pointer and the pointer to the observation point   
         problem.AddResidualBlock(cost_function,
                            new ceres::CauchyLoss(2.0*max_reproj_err_), /*Cauchy loss */
+                           //new ceres::HuberLoss(2.0*max_reproj_err_), /*Huber loss */
                            cameraBlockPtr(cam_pose_index_.at(i_obs)),
                            pointBlockPtr ( point_index_.at(i_obs) ));
 

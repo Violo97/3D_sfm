@@ -28,12 +28,10 @@ void FeatureMatcher::extractFeatures()
 
   auto orb_detector = cv::ORB::create(10000, 1.2, 8);
   // Initialize SIFT detector
-  auto sift_detector = cv::SIFT::create(
-    10000,
-		3,
-		0.04,
-		6,
-		0.5);
+  auto sift_detector = cv::SIFT::create(10000,3,0.04,6,0.5);
+  auto akaze_detector = cv::AKAZE::create(
+    
+  );  
 
   for( int i = 0; i < images_names_.size(); i++  )
   {
@@ -48,29 +46,17 @@ void FeatureMatcher::extractFeatures()
     // Extract also the color (i.e., the cv::Vec3b information) of each feature, and store
     // it into feats_colors_[i] vector
     /////////////////////////////////////////////////////////////////////////////////////////
-    std::cout<<"before creation array"<<"\n";
     // Detect keypoints and compute descriptors for image i
     orb_detector->detectAndCompute(img, cv::Mat(), features_[i], descriptors_[i]);
+    //detect keypoint with SIFT
     //sift_detector->detectAndCompute(gray_img, cv::Mat(), features_[i], descriptors_[i]);
+    //detect keypoint with AKAZE
+    //akaze_detector->detectAndCompute(img, cv::Mat(), features_[i], descriptors_[i]);
 
     std::cout << "value of features "<<features_.size()<<"\n";
-    // Extract the color of each feature
-    /*for (int j = 0; j < features_[i].size(); j++) {
-        cv::Point2f pt = features_[i][j].pt;
-        feats_colors_[i][j] = cv::imread(images_names_[i]).at<cv::Vec3b>(pt.y, pt.x);
-    }*/
-
 
     // Loop over all image
     for (int j = 0; j < features_.size(); j++) {
-      // Load image
-      //cv::Mat image = cv::imread(images_names_[j]);
-
-      // Check if image is loaded properly
-      if (img.empty()) {
-          std::cerr << "Error: could not load image " << images_names_[j] << std::endl;
-          continue;
-      }
 
       // Initialize feats_colors_[i] with the same size as features_[i]
       feats_colors_[j].resize(features_[j].size());
@@ -87,19 +73,14 @@ void FeatureMatcher::extractFeatures()
 
         // Access pixel value at the feature point
         feats_colors_[j][k] = img.at<cv::Vec3b>(pt);
-        std::cout<<feats_colors_[j][k]<<"\n";
       }
     }
 
-
-
-    
-
-    // Display the results
-    //cv::Mat output;
-    //drawKeypoints(cv::imread(images_names_[i]), features_[i], output);
-    //imshow("Keypoints", output);
-    //cv::waitKey(0);
+    // Display the results for each image 
+    /*cv::Mat output;
+    drawKeypoints(cv::imread(images_names_[i]), features_[i], output);
+    imshow("Keypoints", output);
+    cv::waitKey(0);*/
     /////////////////////////////////////////////////////////////////////////////////////////
   }
 }
@@ -129,8 +110,9 @@ void FeatureMatcher::exhaustiveMatching()
       /////////////////////////////////////////////////////////////////////////////////////////
 
       //match descriptor with the similarity between descriptor 
-      cv::BFMatcher matcher(cv::NORM_HAMMING2 , true); // initialize brute-force matcher
-      //cv::BFMatcher matcher(cv::NORM_L2  , true); // initialize brute-force matcher
+      cv::BFMatcher matcher(cv::NORM_HAMMING2 , true); // initialize brute-force matcher for ORB
+      // SIFT and AKAZE matcher
+      //cv::BFMatcher matcher(cv::NORM_L2  , true); // initialize brute-force matcher fro SIFT and AKAZE
 
       matcher.match(descriptors_[i], descriptors_[j], matches); // match descriptors
 
@@ -150,22 +132,17 @@ void FeatureMatcher::exhaustiveMatching()
       
       //control if the dimensions of the points vector are valid and with the same dimension 
       std::cout << " dimension points i : "<<points_i.size() << " dimesnion of points j : "<<points_j.size()<<"\n";
-      //std::vector<cv::KeyPoint> features_j = features_[j];
 
       // Perform geometric validation using Essential matrix
       cv::Mat E, mask_E; // initialize Essential matrix and mask
       E = cv::findEssentialMat(points_i, points_j, new_intrinsics_matrix_, cv::RANSAC,0.999, 3 , mask_E); // estimate Essential matrix
-      cv::Mat R , t;
-      //cv::recoverPose(E, points_i, points_j, new_intrinsics_matrix_, R , t , mask_E); // recover relative pose from Essential matrix
-      //cv::Mat R = pose_.rowRange(0,3).colRange(0,3); // extract rotation matrix
-      //cv::Mat t = pose_.rowRange(0,3).col(3); // extract translation vector
 
       // Perform geometric validation using Homography matrix
       cv::Mat H, mask_H; // initialize Homography matrix and mask
       H = cv::findHomography(points_i, points_j, cv::RANSAC, 3 , mask_H); // estimate Homography matrix
 
+      //count the matches into the two mask of essential and homography matrix
       int count_inE = 0 , count_inH = 0;
-      //cv::perspectiveTransform(points_i, point_j, H);
       for (int k = 0; k < matches.size(); k++) {
         if(mask_E.at<uchar>(k)){
           count_inE++;
@@ -177,16 +154,15 @@ void FeatureMatcher::exhaustiveMatching()
 
       // Select inliers from matches using both geometric models
       for (int k = 0; k < matches.size(); k++) {
-        if (mask_E.at<uchar>(k) && mask_H.at<uchar>(k)) { // if match is an inlier for both models
-          inlier_matches.push_back(matches[k]); // add match to inlier matches
-        }
-        //if(count_inE < count_inH && mask_E.at<uchar>(k)) inlier_matches.push_back(matches[k]);
-        //if(count_inH < count_inE && mask_H.at<uchar>(k)) inlier_matches.push_back(matches[k]);
+
+        //control the better matrix and insert the matches into inlier_matches
+        if(count_inE < count_inH && mask_E.at<uchar>(k)) inlier_matches.push_back(matches[k]);
+        if(count_inH < count_inE && mask_H.at<uchar>(k)) inlier_matches.push_back(matches[k]);
 
 
       }
 
-      // Set inlier matches only if number of matches is larger than a threshold
+      // Set matches only if number of matches is larger than a threshold
       if (inlier_matches.size() > 5) {
         std::cout<<inlier_matches.size()<<"\n";
         setMatches(i, j, inlier_matches); // set inlier matches
